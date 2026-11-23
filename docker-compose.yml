@@ -1,0 +1,117 @@
+# Purple Swarm Lab: fully local, $0 baseline.
+# Every network except mgmt-net is internal (no route out of the box).
+# Pin image tags before first real use; "latest" is only a starting point.
+
+name: purple-swarm
+
+networks:
+  llm-red:          # red agents <-> local LLM + red knowledge store
+    internal: true
+  llm-blue:         # blue agents <-> local LLM + blue knowledge store
+    internal: true
+  arena-net:        # red agents <-> victim targets
+    internal: true
+  siem-net:         # blue agents <-> Splunk
+    internal: true
+  mgmt-net:         # ONLY for publishing UIs to 127.0.0.1 on the host
+    driver: bridge
+
+volumes:
+  ollama-models:
+  qdrant-red:
+  qdrant-blue:
+  splunk-var:
+  splunk-etc:
+
+x-hardening: &hardening
+  security_opt:
+    - no-new-privileges:true
+  restart: unless-stopped
+
+services:
+
+  # ---------------- Shared local LLM ----------------
+  ollama:
+    <<: *hardening
+    image: ollama/ollama:latest
+    volumes:
+      - ollama-models:/root/.ollama
+    networks: [llm-red, llm-blue]
+    environment:
+      - OLLAMA_KEEP_ALIVE=10m
+      - OLLAMA_NUM_PARALLEL=1      # CPU inference: one request at a time
+    mem_limit: 24g
+    cpus: "12.0"
+
+  # ---------------- Knowledge stores (RAG) ----------------
+  # Two instances, not one: red can never read blue's detections and vice versa.
+  qdrant-red:
+    <<: *hardening
+    image: qdrant/qdrant:latest
+    volumes: [qdrant-red:/qdrant/storage]
+    networks: [llm-red]
+    environment:
+      - QDRANT__SERVICE__API_KEY=${QDRANT_RED_KEY:?set in .env}
+    mem_limit: 2g
+
+  qdrant-blue:
+    <<: *hardening
+    image: qdrant/qdrant:latest
+    volumes: [qdrant-blue:/qdrant/storage]
+    networks: [llm-blue]
+    environment:
+      - QDRANT__SERVICE__API_KEY=${QDRANT_BLUE_KEY:?set in .env}
+    mem_limit: 2g
+
+  # ---------------- Target arena ----------------
+  juice-shop:
+    <<: *hardening
+    image: bkimminich/juice-shop:latest
+    networks: [arena-net]
+    cap_drop: [ALL]
+    mem_limit: 1g
+
+  dvwa:
+    <<: *hardening
+    image: vulnerables/web-dvwa:latest
+    networks: [arena-net]
+    mem_limit: 1g
+
+  # ---------------- SIEM (Splunk Free license, 500 MB/day) ----------------
+  splunk:
+    <<: *hardening
+    image: splunk/splunk:latest
+    networks: [siem-net, mgmt-net]
+    ports:
+      - "127.0.0.1:8000:8000"   # web UI, localhost only
+      - "127.0.0.1:8088:8088"   # HEC, localhost only (Docker log driver)
+    environment:
+      - SPLUNK_START_ARGS=--accept-license
+      - SPLUNK_GENERAL_TERMS=--accept-sgt-current-at-splunk-com
+      - SPLUNK_PASSWORD=${SPLUNK_PASSWORD:?set in .env}
+      - SPLUNK_LICENSE_URI=Free
+      - SPLUNK_HEC_TOKEN=${SPLUNK_HEC_TOKEN:?set in .env}
+    volumes:
+      - splunk-var:/opt/splunk/var
+      - splunk-etc:/opt/splunk/etc
+    mem_limit: 8g
+
+  # ---------------- Red swarm ----------------
+  red-cai:
+    <<: *hardening
+    build:
+      context: ./red
+      args:
+        CAI_VERSION: ${CAI_VERSION:-}
+    networks: [llm-red, arena-net]
+    env_file: ./red/red.env
+    cap_drop: [ALL]
+    cap_add: [NET_RAW]          # nmap SYN scans; drop if you only use connect scans
+    stdin_open: true
+    tty: true
+    mem_limit: 4g
+    profiles: [red]             # start only after arena + blue are proven
+
+  # ---------------- Blue swarm ----------------
+  # defensa_azul runs from ./blue (see blue/README.md). It reaches Splunk on
+  # siem-net and the LLM on llm-blue. Containerize it once it works on bare setup.

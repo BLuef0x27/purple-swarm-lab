@@ -1,0 +1,16 @@
+# Secrets
+.env
+*.env
+!*.env.example
+
+# Local data
+scoring/runs/
+rag/corpus/private/
+*.log
+
+# Python
+__pycache__/
+.venv/
+
+# Blue swarm checkout (pinned separately)
+blue/defensa_azul/

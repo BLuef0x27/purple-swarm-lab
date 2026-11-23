@@ -1,0 +1,2 @@
+run_id,date,attack_technique_id,technique_name,red_executed,red_succeeded,blue_detected,detection_name,time_to_detect_sec,notes
+R001,YYYY-MM-DD,T1190,Exploit Public-Facing Application,yes,yes,no,,,example row: SQLi against juice-shop login

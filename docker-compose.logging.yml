@@ -1,0 +1,21 @@
+# Ships target container logs to Splunk HEC through the host's Docker daemon.
+# Use after Splunk is up:
+#   docker compose -f docker-compose.yml -f docker-compose.logging.yml up -d juice-shop dvwa
+# HEC uses Splunk's self-signed cert on localhost, hence insecureskipverify.
+
+x-splunk-logging: &splunk-logging
+  driver: splunk
+  options:
+    splunk-url: "https://127.0.0.1:8088"
+    splunk-token: "${SPLUNK_HEC_TOKEN}"
+    splunk-index: "main"
+    splunk-sourcetype: "docker:arena"
+    splunk-insecureskipverify: "true"
+    splunk-verify-connection: "false"
+    tag: "{{.Name}}"
+
+services:
+  juice-shop:
+    logging: *splunk-logging
+  dvwa:
+    logging: *splunk-logging
